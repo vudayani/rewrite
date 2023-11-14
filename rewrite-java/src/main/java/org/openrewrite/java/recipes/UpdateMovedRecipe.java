@@ -27,23 +27,25 @@ import java.util.List;
 @EqualsAndHashCode(callSuper = false)
 public class UpdateMovedRecipe extends Recipe {
     @Option(displayName = "The fully qualified className of recipe moved from",
-        description = "The fully qualified className of recipe moved from a old package.",
+        description = "The old fully qualified className of recipe before being moved.",
         example = "org.openrewrite.java.cleanup.UnnecessaryCatch")
     String oldRecipeFullyQualifiedClassName;
 
     @Option(displayName = "The fully qualified className of recipe moved to",
-        description = "The fully qualified className of recipe moved to a new package.",
+        description = "The new fully qualified className of recipe after being moved.",
         example = "org.openrewrite.staticanalysis.UnnecessaryCatch")
     String newRecipeFullyQualifiedClassName;
 
     @Override
     public String getDisplayName() {
-        return "Update moved package recipe";
+        return "Update recipe location";
     }
 
     @Override
     public String getDescription() {
-        return "Update moved package recipe.";
+        return "Update all references to a recipe that has moved from one location to another. For instance, if a recipe moves from "
+            + "`org.openrewrite.java.Recipe` to `org.openrewrite.java.migrate.Recipe`, this would update all references to point to the new "
+            + "location.";
     }
 
     @Override
