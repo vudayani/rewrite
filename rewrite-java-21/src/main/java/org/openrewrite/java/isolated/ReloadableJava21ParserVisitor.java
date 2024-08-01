@@ -197,6 +197,17 @@ public class ReloadableJava21ParserVisitor extends TreePathScanner<J, Space> {
     }
 
     @Override
+    public J visitErroneous(ErroneousTree node, Space fmt) {
+        System.out.println("Reloadable java 21");
+        String erroneousNode = source.substring(((JCTree) node).getStartPosition(), ((JCTree) node).getEndPosition(endPosTable));
+        return new J.Erroneous(
+                randomId(),
+                fmt,
+                Markers.EMPTY,
+                erroneousNode);
+    }
+
+    @Override
     public J visitBinary(BinaryTree node, Space fmt) {
         Expression left = convert(node.getLeftOperand());
 
@@ -1763,6 +1774,12 @@ public class ReloadableJava21ParserVisitor extends TreePathScanner<J, Space> {
             case RETURN:
             case THROW:
             case EXPRESSION_STATEMENT:
+                ExpressionTree expTree = ((ExpressionStatementTree) t).getExpression();
+                if (expTree instanceof ErroneousTree) {
+                    return Space.build(source.substring(((JCTree) expTree).getEndPosition(endPosTable),((JCTree) t).getEndPosition(endPosTable)), Collections.emptyList());
+                } else {
+                    return sourceBefore(";");
+                }
             case VARIABLE:
             case YIELD:
                 return sourceBefore(";");
