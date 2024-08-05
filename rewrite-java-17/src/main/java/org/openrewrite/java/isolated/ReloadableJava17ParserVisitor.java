@@ -1005,11 +1005,38 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
         JContainer<Statement> params = JContainer.empty();
         if (!isCompactConstructor) {
             Space paramFmt = sourceBefore("(");
-            params = !node.getParameters().isEmpty() ?
-                    JContainer.build(paramFmt, convertAll(node.getParameters(), commaDelim, t -> sourceBefore(")")),
-                            Markers.EMPTY) :
-                    JContainer.build(paramFmt, singletonList(padRight(new J.Empty(randomId(), sourceBefore(")"),
-                            Markers.EMPTY), EMPTY)), Markers.EMPTY);
+            if (!node.getParameters().isEmpty()) {
+                List<JRightPadded<Statement>> paramList = new ArrayList<>();
+                for (VariableTree param : node.getParameters()) {
+                    JCVariableDecl jcParam = (JCVariableDecl) param;
+                    Statement convertedParam;
+                    Space spaceAfterParam;
+                    if ("<error>".equals(jcParam.getName().toString())) {
+                        String erroneousNode = source.substring(
+                                jcParam.getStartPosition(),
+                                jcParam.getEndPosition(endPosTable)
+                        );
+                        Space spaceBeforeParam = sourceBefore(jcParam.getName().toString());
+                        convertedParam = new J.Erroneous(
+                                randomId(),
+                                spaceBeforeParam,
+                                Markers.EMPTY,
+                                erroneousNode
+                        );
+                        cursor = jcParam.getEndPosition(endPosTable);
+                        spaceAfterParam = sourceBefore(",");  // No space after erroneous node
+                    } else {
+                        convertedParam = (Statement) convert(param);
+                        spaceAfterParam = sourceBefore(",");  // Capture space after each valid parameter
+                    }
+                    paramList.add(padRight(convertedParam, spaceAfterParam));
+                }
+                Space beforeClosingParen = sourceBefore(")");  // Ensure that only captures the closing parenthesis
+                params = JContainer.build(paramFmt, paramList, Markers.EMPTY).withBefore(beforeClosingParen);
+            } else {
+                params = JContainer.build(paramFmt, singletonList(padRight(new J.Empty(randomId(), sourceBefore(")"),
+                        Markers.EMPTY), Space.EMPTY)), Markers.EMPTY);
+            }
         }
 
         JContainer<NameTree> throws_ = node.getThrows().isEmpty() ? null :

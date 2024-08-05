@@ -181,7 +181,7 @@ class JavaParserTest implements RewriteTest {
       """
                 package com.example.demo;
                 class FooBar {
-                    public void test(int num string msg) {
+                    public void test(int num, string msg) {
                       String a; this.ownerR
                       System.out.println();
                     }
@@ -190,7 +190,7 @@ class JavaParserTest implements RewriteTest {
       """
                 package com.example.demo;
                 class FooBar {
-                    public void test(int num string msg) {
+                    public void test() {
                       String a; this.ownerR // comment
                       System.out.println();
                     }
@@ -208,7 +208,7 @@ class JavaParserTest implements RewriteTest {
       """
                 package com.example.demo;
                 class FooBar {
-                    public void test(int param ) {
+                    public void test(int param) {
                       this.ownerR
                       // comment
                     }
@@ -230,14 +230,29 @@ class JavaParserTest implements RewriteTest {
               pet
           }
       """,
-//      """
-//          package com.example.demo;
-//          class FooBar {
-//              public void test(int) {
-//              }
+      """
+          package com.example.demo;
+          class FooBar {
+              public void test(int ) {
+              }
 //              pet
-//          }
-//      """
+          }
+      """,
+      """
+          package com.example.demo;
+          class FooBar {
+              public void test( int a,string) {
+              }
+              pet
+          }
+      """,
+      """
+         package com.example.demo;
+         class FooBar {
+             public void test(int , string b) {
+             }
+         }
+     """
     })
     void erroneousTest(@Language("java") String source) {
         JavaParser javaParser = JavaParser.fromJavaVersion().build();
