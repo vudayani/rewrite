@@ -25,6 +25,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.openrewrite.InMemoryExecutionContext;
 import org.openrewrite.Issue;
 import org.openrewrite.SourceFile;
+import org.openrewrite.java.search.FindCompileErrors;
 import org.openrewrite.java.tree.J;
 import org.openrewrite.test.RewriteTest;
 import org.openrewrite.tree.ParseError;
@@ -162,101 +163,87 @@ class JavaParserTest implements RewriteTest {
 
     @Test
     @Issue("https://github.com/openrewrite/rewrite/issues/1895")
-    void moduleInfo(){
+    void moduleInfo() {
         // Ignored until properly handled: https://github.com/openrewrite/rewrite/issues/4054#issuecomment-2267605739
         assertFalse(JavaParser.fromJavaVersion().build().accept(Path.of("src/main/java/foo/module-info.java")));
     }
 
     @ParameterizedTest
-    // language=java
     @ValueSource(strings = {
       """
-                package com.example.demo;
-                class FooBar {
-                    public void test() {
-                      ownerR
-                    }
-                }
+        package com.example.demo;
+        class FooBar {
+            public void test() {
+                ownerR
+            }
+        }
       """,
       """
-                package com.example.demo;
-                class FooBar {
-                    public void test(int num string msg) {
-                      String a; this.ownerR
-                      System.out.println();
-                    }
-                }
+        package com.example.demo;
+        class FooBar {
+            public void test(int num string s) {
+                String a; this.ownerR
+                System.out.println();
+            }
+        }
       """,
       """
-                package com.example.demo;
-                class FooBar {
-                    public void test(int num) {
-                      String a; this.ownerR // comment
-                      System.out.println();
-                    }
-                }
+        package com.example.demo;
+        class FooBar {
+            public void test(int num) {
+                String a; this.ownerR // comment
+                System.out.println();
+            }
+        }
       """,
       """
-                package com.example.demo;
-                class FooBar {
-                    public void test(int num) {
-                      // comment
-                      this.ownerR
-                    }
-                }
+        package com.example.demo;
+        class FooBar {
+            public void test(int num) {
+                // comment
+                this.ownerR
+            }
+        }
       """,
       """
-                package com.example.demo;
-                class FooBar {
-                    public void test(int param ) {
-                      this.ownerR
-                      // comment
-                    }
-                }
+        package com.example.demo;
+        class FooBar {
+            public void test(int param ) {
+                this.ownerR
+                // comment
+            }
+        }
       """
     })
     void erroneousExpressionStatements(@Language("java") String source) {
-        JavaParser javaParser = JavaParser.fromJavaVersion().build();
-        List<SourceFile> list = javaParser.parse(source).map(sf -> {
-            if (sf instanceof ParseError pe) {
-                return pe.getErroneous();
-            }
-            return sf;
-        }).toList();
-        SourceFile beforeSource = list.get(0);
-        assertThat(beforeSource.printAll()).isEqualTo(source);
+        rewriteRun(
+          java(source)
+        );
     }
 
     @Test
     void erroneousVariableDeclarations() {
-        @Language("java") String source = """
+        rewriteRun(
+          spec -> spec.recipe(new FindCompileErrors()),
+        java(
+          """
             package com.example.demo;
             class FooBar {
-                pet
+                /pet
                 public void test() {
                 }
             }
-          """;
-
-        String expected = """
+          """,
+          """
             package com.example.demo;
             class FooBar {
-                pet <error>
+                /*~~>*//pet
                 public void test() {
                 }
             }
-          """;
-
-
-        JavaParser javaParser = JavaParser.fromJavaVersion().build();
-        List<SourceFile> list = javaParser.parse(source).map(sf -> {
-            if (sf instanceof ParseError pe) {
-                return pe.getErroneous();
-            }
-            return sf;
-        }).toList();
-        SourceFile beforeSource = list.get(0);
-        assertThat(beforeSource.printAll()).isEqualTo(expected);
+          """
+          )
+        );
     }
 
 
