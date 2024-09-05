@@ -1551,10 +1551,17 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
     public J visitVariable(VariableTree node, Space fmt) {
         JCTree.JCVariableDecl jcVariableDecl = (JCTree.JCVariableDecl) node;
         if ("<error>".equals(jcVariableDecl.getName().toString())) {
+            int startPos = jcVariableDecl.getStartPosition();
+            int endPos = jcVariableDecl.getEndPosition(endPosTable);
+
+            if (startPos == endPos) {
+                endPos = startPos + 1;
+            }
             String erroneousNode = source.substring(
-                    jcVariableDecl.getStartPosition(),
-                    jcVariableDecl.getEndPosition(endPosTable)
+                    startPos,
+                    endPos
             );
+
             return new J.Erroneous(
                     randomId(),
                     fmt,
@@ -1746,8 +1753,11 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
         if (idx >= 0 ) {
             rightPadded = (JRightPadded<J2>) JRightPadded.build(getErroneous(List.of(rightPadded)));
         }
-        System.out.println("Pos "+ endPos(t) +" "+cursor);
-        cursor(max(endPos(t), cursor)); // if there is a non-empty suffix, the cursor may have already moved past it
+        if (endPos(t) == cursor && rightPadded.getElement() instanceof J.Erroneous) {
+            cursor++;
+        } else {
+            cursor(max(endPos(t), cursor)); // if there is a non-empty suffix, the cursor may have already moved past it
+        }
         return rightPadded;
     }
 
@@ -1778,19 +1788,10 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
         if (size == 0) {
             return emptyList();
         }
-//        Space suffixSpace = suffix.apply(trees.get(size -1));
-//        if (findFirstNonWhitespaceChar(suffixSpace.getWhitespace()) >= 0) {
-//            return List.of((JRightPadded<J2>) JRightPadded.build(getErroneous(trees, suffixSpace, innerSuffix)));
-//        }
         
         List<JRightPadded<J2>> converted = new ArrayList<>(size);
         for (int i = 0; i < size; i++) {
             converted.add(convert(trees.get(i), i == size - 1 ? suffix : innerSuffix));
-        }
-
-        int idx = findFirstNonWhitespaceChar(converted.get(size-1).getAfter().getWhitespace());
-        if (idx >= 0 ) {
-            return List.of((JRightPadded<J2>) JRightPadded.build(getErroneous(converted)));
         }
         return converted;
     }
@@ -1798,11 +1799,6 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
     private <J2 extends J> J.Erroneous getErroneous(List<JRightPadded<J2>> converted) {
         PrintOutputCapture p = new PrintOutputCapture<>(0);
         new JavaPrinter<>().visitContainer(JContainer.build(EMPTY, converted, Markers.EMPTY), JContainer.Location.METHOD_INVOCATION_ARGUMENTS, p);
-//        String node = converted.stream().map(j -> {
-//            new JavaPrinter<>().visit(JContainer.build(EMPTY, converted, Markers.EMPTY));
-//        });
-//        cursor += p.getOut().length();
-        System.out.println("If done here "+cursor+" + "+p.getOut().length());
         return new J.Erroneous(
                 org.openrewrite.Tree.randomId(),
                 EMPTY,
@@ -1811,37 +1807,9 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
         );
     }
 
-
-//    private J.@NotNull Erroneous getErroneous(List<JRightPadded<J>> converted ) {
-//        StringBuilder sb = new StringBuilder();
-//        int size = trees.size();
-//        for (int i=0; i < size; i++) {
-//            Tree t = trees.get(i);
-//            String prefix = source.substring(cursor, max(((JCTree) t).getStartPosition(), cursor));
-//            cursor += prefix.length();
-//            sb.append(prefix);
-//            String node = source.substring(((JCTree) t).getStartPosition(), ((JCTree) t).getEndPosition(endPosTable));
-//            cursor += node.length();
-//            sb.append(node);
-//            if(i != size - 1) {
-//                sb.append(innerSuffix.apply(t));
-//            } else {
-//                sb.append(suffixSpace.getWhitespace());
-//            }
-//        }
-//        System.out.println(" Final "+sb.toString());
-//        return new J.Erroneous(
-//                org.openrewrite.Tree.randomId(),
-//                EMPTY,
-//                Markers.EMPTY,
-//                sb.toString()
-//        );
-//    }
-
     private static int findFirstNonWhitespaceChar(String s) {
         for(int i=0; i < s.length(); i++) {
             if (!Character.isWhitespace(s.charAt(i))) {
-                System.out.println("idx "+i);
                 return i;
             }
         }
@@ -1891,7 +1859,8 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
                     int end = varTree.getEndPosition(endPosTable);
                     String whitespace = source.substring(start, end);
                     if (whitespace.contains("\n")) {
-                        return Space.build(whitespace, Collections.emptyList());
+//                        return Space.build(whitespace, Collections.emptyList());
+                        return EMPTY;
                     } else {
                         return Space.build(source.substring(start, end), Collections.emptyList());
                     }
@@ -1903,7 +1872,6 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
                 return statementDelim(((JCLabeledStatement) t).getStatement());
             case METHOD:
                 JCMethodDecl m = (JCMethodDecl) t;
-//                return sourceBefore("");
                 return sourceBefore(m.body == null || m.defaultValue != null ? ";" : "");
             default:
                 return t instanceof JCAssignOp || t instanceof JCUnary ? sourceBefore(";") : EMPTY;
@@ -1931,11 +1899,8 @@ public class ReloadableJava17ParserVisitor extends TreePathScanner<J, Space> {
             if (treeGroup.size() == 1) {
                 Tree t = treeGroup.get(0);
                 int startPosition = ((JCTree) t).getStartPosition();
-                System.out.println("start pos "+startPosition +" "+cursor);
                 if(cursor > startPosition)
                     continue;
-
-//                cursor += prefix.length();
                 converted.add(convert(treeGroup.get(0), suffix));
             } else {
                 // multi-variable declarations are split into independent overlapping JCVariableDecl's by the OpenJDK AST

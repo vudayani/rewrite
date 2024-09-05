@@ -228,7 +228,7 @@ class JavaParserTest implements RewriteTest {
         java(
           """
             package com.example.demo;
-            class FooBar {
+            class Foo {
                 /pet
                 public void test() {
                 }
@@ -236,12 +236,30 @@ class JavaParserTest implements RewriteTest {
           """,
           """
             package com.example.demo;
-            class FooBar {
-                /*~~>*//pet
+            class Foo {
+                /*~~>*///*~~>*/pet
                 public void test() {
                 }
             }
           """
+          ),
+          java(
+            """
+              package com.example.demo;
+              class Bar {
+                  pet
+                  public void test() {
+                  }
+              }
+            """,
+            """
+              package com.example.demo;
+              class Bar {
+                  /*~~>*/pet
+                  public void test() {
+                  }
+              }
+            """
           )
         );
     }
