@@ -15,6 +15,7 @@
  */
 package org.openrewrite.java;
 
+import org.jspecify.annotations.Nullable;
 import org.openrewrite.Cursor;
 import org.openrewrite.PrintOutputCapture;
 import org.openrewrite.Tree;
@@ -1226,7 +1227,7 @@ public class JavaPrinter<P> extends JavaVisitor<PrintOutputCapture<P>> {
     }
 
     @SuppressWarnings("ForLoopReplaceableByForEach")
-    protected void beforeSyntax(Space prefix, Markers markers, @Nullable Space.Location loc, PrintOutputCapture<P> p) {
+    protected void beforeSyntax(Space prefix, Markers markers, Space.@Nullable Location loc, PrintOutputCapture<P> p) {
         List<Marker> markersList = markers.getMarkers();
         for (int i = 0; i < markersList.size(); i++) {
             Marker marker = markersList.get(i);

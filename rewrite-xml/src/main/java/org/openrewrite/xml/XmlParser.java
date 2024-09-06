@@ -17,10 +17,10 @@ package org.openrewrite.xml;
 
 import org.antlr.v4.runtime.*;
 import org.intellij.lang.annotations.Language;
+import org.jspecify.annotations.Nullable;
 import org.openrewrite.*;
 import org.openrewrite.Parser;
 import org.openrewrite.internal.EncodingDetectingInputStream;
-import org.openrewrite.internal.lang.Nullable;
 import org.openrewrite.tree.ParseError;
 import org.openrewrite.tree.ParsingEventListener;
 import org.openrewrite.tree.ParsingExecutionContextView;
@@ -42,9 +42,11 @@ public class XmlParser implements Parser {
             try (EncodingDetectingInputStream is = input.getSource(ctx)) {
                 String sourceStr = is.readFully();
 
-                XMLParser parser = new XMLParser(new CommonTokenStream(new XMLLexer(
-                        CharStreams.fromString(sourceStr))));
+                XMLLexer lexer = new XMLLexer(CharStreams.fromString(sourceStr));
+                lexer.removeErrorListeners();
+                lexer.addErrorListener(new ForwardingErrorListener(input.getPath(), ctx));
 
+                XMLParser parser = new XMLParser(new CommonTokenStream(lexer));
                 parser.removeErrorListeners();
                 parser.addErrorListener(new ForwardingErrorListener(input.getPath(), ctx));
 
@@ -99,7 +101,7 @@ public class XmlParser implements Parser {
                p.endsWith(".pst") ||
                // C# project files
                p.endsWith(".csproj") ||
-               p.equals("packages.config");
+               path.endsWith("packages.config");
     }
 
     @Override
