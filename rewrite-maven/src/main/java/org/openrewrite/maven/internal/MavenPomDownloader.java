@@ -22,6 +22,7 @@ import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Metrics;
 import io.micrometer.core.instrument.Timer;
 import lombok.Getter;
+import lombok.Value;
 import org.jspecify.annotations.Nullable;
 import org.openrewrite.ExecutionContext;
 import org.openrewrite.HttpSenderExecutionContextView;
@@ -42,6 +43,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.ZonedDateTime;
 import java.util.*;
 import java.util.concurrent.TimeoutException;
 import java.util.regex.Matcher;
@@ -256,15 +258,14 @@ public class MavenPomDownloader {
                 boolean cacheEmptyResult = false;
                 try {
                     String scheme = URI.create(repo.getUri()).getScheme();
-                    String uri = repo.getUri() + (repo.getUri().endsWith("/") ? "" : "/") +
+                    String baseUri = repo.getUri() + (repo.getUri().endsWith("/") ? "" : "/") +
                                  requireNonNull(gav.getGroupId()).replace('.', '/') + '/' +
                                  gav.getArtifactId() + '/' +
-                                 (gav.getVersion() == null ? "" : gav.getVersion() + '/') +
-                                 "maven-metadata.xml";
+                                 (gav.getVersion() == null ? "" : gav.getVersion() + '/');
 
                     if ("file".equals(scheme)) {
                         // A maven repository can be expressed as a URI with a file scheme
-                        Path path = Paths.get(URI.create(uri));
+                        Path path = Paths.get(URI.create(baseUri + "maven-metadata-local.xml"));
                         if (Files.exists(path)) {
                             MavenMetadata parsed = MavenMetadata.parse(Files.readAllBytes(path));
                             if (parsed != null) {
@@ -272,7 +273,7 @@ public class MavenPomDownloader {
                             }
                         }
                     } else {
-                        byte[] responseBody = requestAsAuthenticatedOrAnonymous(repo, uri);
+                        byte[] responseBody = requestAsAuthenticatedOrAnonymous(repo, baseUri + "maven-metadata.xml");
                         MavenMetadata parsed = MavenMetadata.parse(responseBody);
                         if (parsed != null) {
                             result = Optional.of(parsed);
@@ -392,7 +393,7 @@ public class MavenPomDownloader {
                         versions.add(path.getFileName().toString());
                     }
                 }
-                return new MavenMetadata.Versioning(versions, null, null);
+                return new MavenMetadata.Versioning(versions, null, null, null);
             } catch (IOException e) {
                 throw new MavenDownloadingException("Unable to derive metadata from file repository. " + e.getMessage(), null, gav);
             }
@@ -422,7 +423,7 @@ public class MavenPomDownloader {
             return null;
         }
 
-        return new MavenMetadata.Versioning(versions, null, null);
+        return new MavenMetadata.Versioning(versions, null, null, null);
     }
 
     String hrefToVersion(String href, String rootUri) {
@@ -446,8 +447,13 @@ public class MavenPomDownloader {
                 mergeVersions(m1.getVersioning().getVersions(), m2.getVersioning().getVersions()),
                 Stream.concat(m1.getVersioning().getSnapshotVersions() == null ? Stream.empty() : m1.getVersioning().getSnapshotVersions().stream(),
                         m2.getVersioning().getSnapshotVersions() == null ? Stream.empty() : m2.getVersioning().getSnapshotVersions().stream()).collect(toList()),
-                maxSnapshot(m1.getVersioning().getSnapshot(), m2.getVersioning().getSnapshot())
+                maxSnapshot(m1.getVersioning().getSnapshot(), m2.getVersioning().getSnapshot()),
+                maxLastUpdated(m1.getVersioning().getLastUpdated(), m2.getVersioning().getLastUpdated())
         ));
+    }
+
+    private @Nullable ZonedDateTime maxLastUpdated(@Nullable ZonedDateTime left, @Nullable ZonedDateTime right) {
+        return left == null ? right : right == null ? left : left.compareTo(right) >= 0 ? left : right;
     }
 
     private List<String> mergeVersions(List<String> versions1, List<String> versions2) {
@@ -728,8 +734,7 @@ public class MavenPomDownloader {
                 return null;
             }
 
-            String originalUrl = repository.getUri();
-            if ("file".equals(URI.create(originalUrl).getScheme())) {
+            if ("file".equals(URI.create(repository.getUri()).getScheme())) {
                 return repository;
             }
             result = mavenCache.getNormalizedRepository(repository);
@@ -739,63 +744,13 @@ public class MavenPomDownloader {
                     ctx.getResolutionListener().repositoryAccessFailed(repository.getUri(), new IllegalArgumentException("Repository " + repository.getUri() + " is not HTTP(S)."));
                     return null;
                 }
-
-                // Always prefer to use https, fallback to http only if https isn't available
-                // URLs are case-sensitive after the domain name, so it can be incorrect to lowerCase() a whole URL
-                // This regex accepts any capitalization of the letters in "http"
-                String httpsUri = repository.getUri().toLowerCase().startsWith("http:") ?
-                        repository.getUri().replaceFirst("[hH][tT][tT][pP]://", "https://") :
-                        repository.getUri();
-                if (!httpsUri.endsWith("/")) {
-                    httpsUri += "/";
-                }
-
-                HttpSender.Request.Builder request = applyAuthenticationToRequest(repository, httpSender.head(httpsUri));
                 MavenRepository normalized = null;
                 try {
-                    sendRequest(request.build());
-                    normalized = repository.withUri(httpsUri).withKnownToExist(true);
-                } catch (Throwable t) {
-                    if (t instanceof HttpSenderResponseException) {
-                        HttpSenderResponseException e = (HttpSenderResponseException) t;
-                        // response was returned from the server, but it was not a 200 OK. The server therefore exists.
-                        if (e.isServerReached()) {
-                            normalized = repository.withUri(httpsUri);
-                        }
-                    }
-                    if (normalized == null) {
-                        if (!httpsUri.equals(originalUrl)) {
-                            try {
-                                sendRequest(request.url(originalUrl).build());
-                                normalized = new MavenRepository(
-                                        repository.getId(),
-                                        originalUrl,
-                                        repository.getReleases(),
-                                        repository.getSnapshots(),
-                                        repository.getUsername(),
-                                        repository.getPassword(),
-                                        repository.getTimeout());
-                            } catch (HttpSenderResponseException e) {
-                                //Response was returned from the server, but it was not a 200 OK. The server therefore exists.
-                                if (e.isServerReached()) {
-                                    normalized = new MavenRepository(
-                                            repository.getId(),
-                                            originalUrl,
-                                            repository.getReleases(),
-                                            repository.getSnapshots(),
-                                            repository.getUsername(),
-                                            repository.getPassword(),
-                                            repository.getTimeout());
-                                }
-                            } catch (Throwable e) {
-                                // ok to fall through here and cache a null
-                            }
-                        }
-                    }
-                    if (normalized == null) {
-                        ctx.getResolutionListener().repositoryAccessFailed(repository.getUri(), t);
-                    }
+                    normalized = normalizeRepository(repository);
+                } catch (Throwable e) {
+                    ctx.getResolutionListener().repositoryAccessFailed(repository.getUri(), e);
                 }
+
                 mavenCache.putNormalizedRepository(repository, normalized);
                 result = Optional.ofNullable(normalized);
             }
@@ -807,6 +762,89 @@ public class MavenPomDownloader {
 
         return result == null || !result.isPresent() ? null : applyAuthenticationToRepository(result.get());
     }
+
+    @Nullable
+    MavenRepository normalizeRepository(MavenRepository repository) throws Throwable {
+        // Always prefer to use https, fallback to http only if https isn't available
+        // URLs are case-sensitive after the domain name, so it can be incorrect to lowerCase() a whole URL
+        // This regex accepts any capitalization of the letters in "http"
+        String originalUrl = repository.getUri();
+        String httpsUri = originalUrl.toLowerCase().startsWith("http:") ?
+                repository.getUri().replaceFirst("[hH][tT][tT][pP]://", "https://") :
+                repository.getUri();
+        if (!httpsUri.endsWith("/")) {
+            httpsUri += "/";
+        }
+
+        HttpSender.Request.Builder request = httpSender.options(httpsUri);
+        if (repository.getTimeout() != null) {
+            request = request.withConnectTimeout(repository.getTimeout())
+                    .withReadTimeout(repository.getTimeout());
+        }
+
+        ReachabilityResult reachability = reachable(applyAuthenticationToRequest(repository, request));
+        if (reachability.isSuccess()) {
+            return repository.withUri(httpsUri);
+        }
+        reachability = reachable(applyAuthenticationToRequest(repository, request.withMethod(HttpSender.Method.HEAD).url(httpsUri)));
+        if (reachability.isReachable()) {
+            return repository.withUri(httpsUri);
+        }
+        if (!originalUrl.equals(httpsUri)) {
+            reachability = reachable(applyAuthenticationToRequest(repository, request.withMethod(HttpSender.Method.OPTIONS).url(originalUrl)));
+            if (reachability.isSuccess()) {
+                return repository.withUri(originalUrl);
+            }
+            reachability = reachable(applyAuthenticationToRequest(repository, request.withMethod(HttpSender.Method.HEAD).url(originalUrl)));
+            if (reachability.isReachable()) {
+                return repository.withUri(originalUrl);
+            }
+        }
+        // Won't be null if server is unreachable
+        throw Objects.requireNonNull(reachability.throwable);
+    }
+
+    @Value
+    private static class ReachabilityResult {
+        Reachability reachability;
+        @Nullable
+        Throwable throwable;
+
+        private static ReachabilityResult success() {
+            return new ReachabilityResult(Reachability.SUCCESS, null);
+        }
+
+        public boolean isReachable() {
+            return reachability == Reachability.SUCCESS || reachability == Reachability.ERROR;
+        }
+
+        public boolean isSuccess() {
+            return reachability == Reachability.SUCCESS;
+        }
+    }
+
+    enum Reachability {
+        SUCCESS,
+        ERROR,
+        UNREACHABLE;
+    }
+
+    private ReachabilityResult reachable(HttpSender.Request.Builder request) {
+        try {
+            sendRequest(request.build());
+            return ReachabilityResult.success();
+        } catch (Throwable t) {
+            if (t instanceof HttpSenderResponseException) {
+                HttpSenderResponseException e = (HttpSenderResponseException) t;
+                // response was returned from the server, but it was not a 200 OK. The server therefore exists.
+                if (e.isServerReached()) {
+                    return new ReachabilityResult(Reachability.ERROR, t);
+                }
+            }
+            return new ReachabilityResult(Reachability.UNREACHABLE, t);
+        }
+    }
+
 
     /**
      * Replicates Apache Maven's behavior to attempt anonymous download if repository credentials prove invalid
